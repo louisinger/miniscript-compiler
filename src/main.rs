@@ -3,6 +3,7 @@ extern crate hex;
 
 use miniscript::extensions;
 use miniscript::policy;
+use miniscript::Descriptor;
 use miniscript::MiniscriptKey;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -66,13 +67,11 @@ pub struct DescriptorInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_pubkey: Option<HexBytes>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub unsigned_script_sig: Option<HexBytes>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub witness_script: Option<HexBytes>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_satisfaction_weight: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_paths: Option<Vec<String>>
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
@@ -112,33 +111,41 @@ fn main() {
 }
 
 fn parse_descriptor(desc_str: String) {
-    let info = miniscript::Descriptor::<bitcoin::PublicKey, extensions::CovenantExt<extensions::CovExtArgs>>::from_str(
+    let info = Descriptor::<bitcoin::PublicKey>::from_str(
         desc_str.as_str(),
-    ).map(|desc| DescriptorInfo {
+    ).map(|desc| DescriptorInfo {        
 			descriptor: desc.to_string(),
 			key_type: MiniscriptKeyType::PublicKey,
 			script_pubkey: Some(desc.script_pubkey().into_bytes().into()),
-			unsigned_script_sig: Some(desc.unsigned_script_sig().into_bytes().into()),
-			witness_script: desc.explicit_script().map(|s| s.into_bytes().into()).ok(),
 			max_satisfaction_weight: desc.max_weight_to_satisfy().ok(),
 			policy: policy::Liftable::lift(&desc).map(|pol| pol.to_string()).ok(),
+            script_paths: if let miniscript::Descriptor::TrExt(ref p) = desc {
+                Some(
+                    p.iter_scripts().map(
+                        |(_ ,script)| script
+                            .as_miniscript().unwrap().encode().asm()
+                    )
+                    .collect()
+                )
+            } else {
+                println!("Not a Tr descriptor");
+                None
+            }
 		})
 		.or_else(|e| {
             println!("Error: {}", e);
 
 			// Then try with strings.
 			desc_str
-            .parse::<miniscript::Descriptor<String, extensions::CovenantExt<extensions::CovExtArgs>>>()
+            .parse::<Descriptor<String, extensions::CovenantExt<extensions::CovExtArgs>>>()
             .map(|desc| DescriptorInfo {
 				descriptor: desc.to_string(),
 				key_type: MiniscriptKeyType::String,
 				script_pubkey: None,
-				unsigned_script_sig: None,
-				witness_script: None,
 				max_satisfaction_weight: desc.max_weight_to_satisfy().ok(),
 				policy: policy::Liftable::lift(&desc).map(|pol| pol.to_string()).ok(),
+                script_paths: None
 			})
-
 		});
 
     if let Ok(info) = info {
@@ -186,9 +193,13 @@ where
 
 fn format_str(str: String) -> String {
     // remove \t, \n, \r and " "
-    return str
+    // remove all unprintable characters
+    str
         .replace("\t", "")
         .replace("\n", "")
         .replace("\r", "")
-        .replace(" ", "");
+        .replace(" ", "")
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_control())
+        .collect()
 }
