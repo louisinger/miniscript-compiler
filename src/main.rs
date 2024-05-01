@@ -127,8 +127,15 @@ fn parse_descriptor(desc_str: String) {
                     )
                     .collect()
                 )
+            } else if let miniscript::Descriptor::Tr(ref p) = desc {
+                Some(
+                    p.iter_scripts().map(
+                        |(_ ,script)| script
+                            .as_miniscript().unwrap().encode().asm()
+                    )
+                    .collect()
+                )
             } else {
-                println!("Not a Tr descriptor");
                 None
             }
 		})
